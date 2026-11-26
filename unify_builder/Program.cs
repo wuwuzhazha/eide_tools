@@ -4891,6 +4891,31 @@ namespace unify_builder
             return runExe(exe, args, out output_, out string _, out string __, encoding, dryRun);
         }
 
+        public static int runExe(string exe, string[] args, out string output_, Encoding encoding = null, bool dryRun = false)
+        {
+            return runExe(exe, args, out output_, out string _, out string __, encoding, dryRun);
+        }
+
+        static Process startExe(string filename, Encoding encoding, bool redirectOutput)
+        {
+            // if executable is 'cmd.exe', force use ascii
+            if (filename == "cmd" ||
+                filename == "cmd.exe")
+            {
+                encoding = RuntimeEncoding.instance().Default;
+            }
+
+            Process process = new();
+            process.StartInfo.FileName = replaceEnvVariable(filename);
+            process.StartInfo.UseShellExecute = false;
+            process.StartInfo.RedirectStandardOutput = redirectOutput;
+            process.StartInfo.RedirectStandardError = redirectOutput;
+            process.StartInfo.CreateNoWindow = true;
+            process.StartInfo.StandardOutputEncoding = encoding ?? RuntimeEncoding.instance().Default;
+            process.StartInfo.StandardErrorEncoding = encoding ?? RuntimeEncoding.instance().Default;
+            return process;
+        }
+
         public static int runExe(
             string filename, string args,
             out string output_, out string stdOut_, out string stdErr_,
@@ -4904,24 +4929,34 @@ namespace unify_builder
                 return 0;
             }
 
-            // if executable is 'cmd.exe', force use ascii
-            if (filename == "cmd" ||
-                filename == "cmd.exe")
+            Process process = startExe(filename, encoding, true);
+            process.StartInfo.Arguments = replaceEnvVariable(args); // 注意：分配给 Arguments 属性的字符串的长度必须小于 32,699。
+            process.Start();
+            return readProcessOutput(process, out output_, out stdOut_, out stdErr_);
+        }
+
+        public static int runExe(
+            string filename, string[] args,
+            out string output_, out string stdOut_, out string stdErr_,
+            Encoding encoding = null, bool dryRun = false)
+        {
+            if (dryRun)
             {
-                encoding = RuntimeEncoding.instance().Default;
+                output_ = "";
+                stdOut_ = "";
+                stdErr_ = "";
+                return 0;
             }
 
-            Process process = new();
-            process.StartInfo.FileName = replaceEnvVariable(filename);
-            process.StartInfo.Arguments = replaceEnvVariable(args); // 注意：分配给 Arguments 属性的字符串的长度必须小于 32,699。
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.RedirectStandardOutput = true;
-            process.StartInfo.RedirectStandardError = true;
-            process.StartInfo.CreateNoWindow = true;
-            process.StartInfo.StandardOutputEncoding = encoding ?? RuntimeEncoding.instance().Default;
-            process.StartInfo.StandardErrorEncoding = encoding ?? RuntimeEncoding.instance().Default;
+            Process process = startExe(filename, encoding, true);
+            foreach (string arg in args)
+                process.StartInfo.ArgumentList.Add(replaceEnvVariable(arg));
             process.Start();
+            return readProcessOutput(process, out output_, out stdOut_, out stdErr_);
+        }
 
+        static int readProcessOutput(Process process, out string output_, out string stdOut_, out string stdErr_)
+        {
             StringBuilder output = new();
             StringBuilder stdOut = new();
             StringBuilder stdErr = new();
@@ -4973,24 +5008,32 @@ namespace unify_builder
                 return 0;
             }
 
-            // if executable is 'cmd.exe', force use ascii
-            if (filename == "cmd" ||
-                filename == "cmd.exe")
-            {
-                encoding = RuntimeEncoding.instance().Default;
-            }
-
-            Process process = new();
-            process.StartInfo.FileName = replaceEnvVariable(filename);
+            Process process = startExe(filename, encoding, false);
             process.StartInfo.Arguments = replaceEnvVariable(args); // 注意：分配给 Arguments 属性的字符串的长度必须小于 32,699。
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.RedirectStandardOutput = false;
-            process.StartInfo.RedirectStandardError = false;
-            process.StartInfo.CreateNoWindow = true;
-            process.StartInfo.StandardOutputEncoding = encoding ?? RuntimeEncoding.instance().Default;
-            process.StartInfo.StandardErrorEncoding = encoding ?? RuntimeEncoding.instance().Default;
             process.Start();
 
+            return waitProcessExit(process);
+        }
+
+        public static int runExe(
+            string filename, string[] args,
+            Encoding encoding = null, bool dryRun = false)
+        {
+            if (dryRun)
+            {
+                return 0;
+            }
+
+            Process process = startExe(filename, encoding, false);
+            foreach (string arg in args)
+                process.StartInfo.ArgumentList.Add(replaceEnvVariable(arg));
+            process.Start();
+
+            return waitProcessExit(process);
+        }
+
+        static int waitProcessExit(Process process)
+        {
             process.WaitForExit();
             int exitCode = process.ExitCode;
             process.Close();
@@ -5000,40 +5043,16 @@ namespace unify_builder
 
         public static int runShellCommand(string command, out string _output, Encoding encoding = null, bool dryRun = false)
         {
-            string filename;
-            string args;
-
             if (OsInfo.instance().OsType == "win32")
-            {
-                filename = "cmd";
-                args = "/C \"" + command + "\"";
-            }
-            else
-            {
-                filename = "/bin/bash";
-                args = "-c \"" + command + "\"";
-            }
-
-            return runExe(filename, args, out _output, encoding, dryRun);
+                return runExe("cmd", "/C \"" + command + "\"", out _output, encoding, dryRun);
+            return runExe("/bin/bash", new string[] { "-c", command }, out _output, encoding, dryRun);
         }
 
         public static int runShellCommand(string command, Encoding encoding = null, bool dryRun = false)
         {
-            string filename;
-            string args;
-
             if (OsInfo.instance().OsType == "win32")
-            {
-                filename = "cmd";
-                args = "/C \"" + command + "\"";
-            }
-            else
-            {
-                filename = "/bin/bash";
-                args = "-c \"" + command + "\"";
-            }
-
-            return runExe(filename, args, encoding, dryRun);
+                return runExe("cmd", "/C \"" + command + "\"", encoding, dryRun);
+            return runExe("/bin/bash", new string[] { "-c", command }, encoding, dryRun);
         }
 
         static string getCompileLogTag(string sourceType)
